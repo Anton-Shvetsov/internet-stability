@@ -1,0 +1,4 @@
+# Batch files keep CRLF in the repository: a raw download of install.bat must run as is.
+*.bat -text
+*.sh text eol=lf
+*.command text eol=lf

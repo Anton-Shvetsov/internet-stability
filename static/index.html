@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Стабильность интернета</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2310b981'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --border: #e3e6eb; --text: #1f2937; --muted: #6b7280;
+    --faint: #9ca3af; --track: #eef0f3; --row: #f0f2f5;
+    --ok: #059669; --warn: #d97706; --bad: #dc2626;
+    --net: #ef4444; --vpn: #f59e0b; --gap: #cbd5e1;
+    --banner-bg: #fffbeb; --banner-border: #fcd34d; --banner-text: #92400e;
+    --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --border: #2a2f3a; --text: #e5e7eb; --muted: #9ca3af;
+      --faint: #6b7280; --track: #232733; --row: #222632;
+      --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+      --gap: #475569;
+      --banner-bg: #2a2110; --banner-border: #8a6a1c; --banner-text: #fcd34d;
+      --accent: #60a5fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+           margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+         background: var(--card); }
+  .seg button { border: 0; background: none; color: var(--muted); padding: 6px 12px; cursor: pointer;
+                font: inherit; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+          margin-bottom: 14px; }
+  .card h3 { font-size: 14px; margin: 0 0 10px; }
+  .grid { display: grid; gap: 12px; }
+  .status { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 14px; }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-bottom: 8px; }
+  .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+  .tile .k { font-size: 12px; color: var(--muted); }
+  .tile .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .st { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--border);
+        border-radius: 12px; padding: 12px 14px; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--gap); }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+  .st .t { font-weight: 600; }
+  .st .d { font-size: 12px; color: var(--muted); }
+  .banner { border: 1px solid var(--banner-border); background: var(--banner-bg); color: var(--banner-text);
+            border-radius: 12px; padding: 8px 14px; margin-bottom: 10px; }
+  .note { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .head h3 { margin: 0; }
+  .day { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 3px 0; }
+  .day .dt { width: 46px; flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .day .bar { flex: 1; height: 12px; background: var(--track); border-radius: 4px; overflow: hidden; display: flex; }
+  .day .tot { width: 92px; flex: none; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .empty { color: var(--faint); }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 4px 12px 4px 0;
+       border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 5px 12px 5px 0; border-bottom: 1px solid var(--row); vertical-align: top; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.muted td { color: var(--faint); }
+  tr.detail td { border-bottom: 0; font-size: 12px; color: var(--muted); padding-top: 0; }
+  .tg { border: 0; background: none; color: var(--faint); cursor: pointer; font-size: 13px; padding: 0 4px; }
+  .tg:hover { color: var(--text); }
+  .kind { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .kind i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .probes { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .probe { display: flex; align-items: baseline; gap: 8px; margin: 2px 0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .ok-t { color: var(--ok); } .bad-t { color: var(--warn); }
+  details summary { cursor: pointer; font-weight: 600; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  textarea, input[type=number] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+       border-radius: 8px; padding: 8px; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  input[type=number] { max-width: 160px; font-family: inherit; }
+  .row2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .btn { margin-top: 12px; background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px;
+         font: inherit; cursor: pointer; }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .msg { margin-left: 10px; font-size: 13px; }
+  .hint { font-size: 12px; color: var(--faint); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Стабильность интернета</h1>
+      <div class="sub" id="host"></div>
+    </div>
+    <div class="seg" id="days"></div>
+  </header>
+
+  <div id="error" class="banner" style="display:none"></div>
+  <div class="grid status" id="status"></div>
+  <div id="current"></div>
+  <div class="grid tiles" id="tiles"></div>
+  <p class="note" id="observed"></p>
+
+  <div class="card">
+    <div class="head">
+      <h3>По дням</h3>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--net)"></span>нет интернета</span>
+        <span><span class="sw" style="background:var(--vpn)"></span>нет VPN</span>
+        <span><span class="sw" style="background:var(--gap)"></span>монитор не работал</span>
+      </div>
+    </div>
+    <div id="daily"></div>
+    <div class="hint">Полоса — сутки. Серое — время, когда монитор не работал (компьютер выключен или спал, окно закрыто): что было с интернетом тогда, неизвестно, и в доступность это время не входит.</div>
+  </div>
+
+  <div class="card">
+    <h3>Падения</h3>
+    <div class="tablewrap" id="incidents"></div>
+  </div>
+
+  <div class="card">
+    <h3>Последняя проверка</h3>
+    <div class="grid probes" id="probes"></div>
+    <div class="hint">Группа считается живой, если ответила хоть одна цель. Проверка целей: выключите VPN — обе цели VPN должны стать ✗, а цели интернета остаться ✓. Если ✗ стали и они — у VPN-клиента включён kill switch, и падение VPN будет записано как «Нет интернета».</div>
+  </div>
+
+  <div class="card">
+    <details id="settings-box">
+      <summary>Настройки</summary>
+      <form id="settings" autocomplete="off">
+        <div class="row2">
+          <div>
+            <label for="net_targets">Цели интернета — по одной на строку</label>
+            <textarea id="net_targets" rows="4"></textarea>
+          </div>
+          <div>
+            <label for="vpn_targets">Цели VPN — сайты, которые открываются <b>только</b> через VPN</label>
+            <textarea id="vpn_targets" rows="4"></textarea>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="probe_interval_sec">Интервал проверки, секунд (10–3600)</label>
+            <input type="number" id="probe_interval_sec" min="10" max="3600" step="1">
+          </div>
+          <div>
+            <label for="min_outage_min">Порог падения, минут — короче не записывается (0–1440)</label>
+            <input type="number" id="min_outage_min" min="0" max="1440" step="1">
+          </div>
+        </div>
+        <button class="btn" type="submit" id="save">Сохранить</button><span class="msg" id="save-msg"></span>
+        <div class="hint" id="listen"></div>
+      </form>
+    </details>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var DAYS = [[1, "24 ч"], [7, "7 дней"], [30, "30 дней"], [90, "90 дней"], [365, "год"]];
+  var GAP_LABELS = {stop: "монитор остановлен", crash: "монитор не работал", sleep: "компьютер спал",
+                    unknown: "нет данных"};
+  var COLORS = {net: "var(--net)", vpn: "var(--vpn)", gap: "var(--gap)"};
+  var openRows = {};
+  var days = 30;
+  var last = null;
+  try { var d = parseInt(localStorage.getItem("is_days"), 10); if (DAYS.some(function (x) { return x[0] === d; })) days = d; } catch (e) {}
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+    });
+  }
+  function dur(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    if (sec < 60) return sec + " с";
+    if (sec < 3600) return Math.floor(sec / 60) + " мин";
+    if (sec < 86400) return Math.floor(sec / 3600) + " ч " + Math.floor((sec % 3600) / 60) + " мин";
+    return Math.floor(sec / 86400) + " д " + Math.floor((sec % 86400) / 3600) + " ч";
+  }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function fmt(iso, withDate) {
+    if (!iso) return "";
+    var t = new Date(iso);
+    var hm = pad(t.getHours()) + ":" + pad(t.getMinutes());
+    return withDate ? pad(t.getDate()) + "." + pad(t.getMonth() + 1) + " " + hm : hm;
+  }
+  function fmtFull(iso) {
+    var t = new Date(iso);
+    return pad(t.getDate()) + "." + pad(t.getMonth() + 1) + "." + t.getFullYear() + " " + fmt(iso);
+  }
+  function pct(v) { return v == null ? '<span class="empty">—</span>' : v.toFixed(2) + "%"; }
+  function since(iso) { return (Date.now() - Date.parse(iso)) / 1000; }
+  function label(i) {
+    if (i.kind === "net") return "Нет интернета";
+    if (i.kind === "vpn") return "Нет VPN";
+    if (i.kind === "gap") return "Не наблюдалось: " + (GAP_LABELS[i.sub] || i.sub);
+    return i.kind;
+  }
+
+  function renderDays() {
+    $("days").innerHTML = DAYS.map(function (d) {
+      return '<button type="button" data-days="' + d[0] + '"' + (d[0] === days ? ' class="on"' : "") + ">" + d[1] + "</button>";
+    }).join("");
+  }
+
+  function statusCard(title, s, unknownText) {
+    var cls = "", text, det = "";
+    if (!s) { text = unknownText; }
+    else if (!s.down) { cls = "ok"; text = "В порядке"; }
+    else if (s.confirmed) { cls = "bad"; text = "Нет связи"; det = "с " + fmt(s.since) + ' (<span data-since="' + esc(s.since) + '">' + dur(since(s.since)) + "</span>)"; }
+    else { cls = "warn"; text = "Не отвечает — проверяем"; det = "с " + fmt(s.since); }
+    return '<div class="st"><span class="dot ' + cls + '"></span><div><div class="t">' + title + ": " + text +
+           '</div><div class="d">' + det + "</div></div></div>";
+  }
+
+  function render(u) {
+    last = u;
+    $("host").textContent = "Устройство: " + u.host + (u.live.last_tick ? " · последняя проверка в " + fmt(u.live.last_tick) : "");
+    var live = u.live;
+    if (!live.running || !live.last_tick) {
+      $("status").innerHTML = statusCard("Интернет", null, live.running ? "первая проверка…" : "монитор не запущен") +
+                              statusCard("VPN", null, live.running ? "первая проверка…" : "монитор не запущен");
+    } else {
+      $("status").innerHTML = statusCard("Интернет", live.net, "—") +
+                              statusCard("VPN", live.vpn, "неизвестно — нет интернета");
+    }
+
+    $("current").innerHTML = u.incidents.filter(function (i) { return i.open && i.kind !== "gap"; }).map(function (i) {
+      return '<div class="banner">Сейчас: <b>' + label(i) + "</b> — с " + fmt(i.start, true) +
+             ' (<span data-since="' + esc(i.start) + '">' + dur(i.duration_sec) + "</span>)</div>";
+    }).join("");
+
+    var tiles = [["Доступность", pct(u.uptime.all)], ["Интернет", pct(u.uptime.net)], ["VPN", pct(u.uptime.vpn)],
+                 ["Падений", u.count], ["Простой всего", dur(u.down_sec)], ["Самое долгое", dur(u.longest_sec)]];
+    $("tiles").innerHTML = tiles.map(function (t) {
+      return '<div class="tile"><div class="k">' + t[0] + '</div><div class="v">' + t[1] + "</div></div>";
+    }).join("");
+
+    var minOut = Math.max(1, Math.round(u.min_outage_sec / 60));
+    $("observed").textContent = (u.observed_from ? "Наблюдение с " + fmtFull(u.observed_from) + ". " : "") +
+      "Проверка раз в " + u.interval_sec + " с; падения короче " + minOut + " мин не записываются." +
+      (u.gap_sec ? " Монитор не работал за период: " + dur(u.gap_sec) + "." : "");
+
+    var shown = 0;
+    var rows = u.daily.map(function (d) {
+      var total = d.net + d.vpn + d.gap;
+      if (!total) return "";
+      shown++;
+      var segs = ["net", "vpn", "gap"].map(function (k) {
+        if (!d[k]) return "";
+        return '<div style="width:' + Math.max(d[k] / 864, 0.4).toFixed(3) + "%;background:" + COLORS[k] + '"></div>';
+      }).join("");
+      var down = d.net + d.vpn;
+      var tip = (d.net ? "нет интернета: " + dur(d.net) + " " : "") + (d.vpn ? "нет VPN: " + dur(d.vpn) + " " : "") +
+                (d.gap ? "не наблюдалось: " + dur(d.gap) : "");
+      return '<div class="day"><div class="dt">' + d.date.slice(8, 10) + "." + d.date.slice(5, 7) +
+             '</div><div class="bar" title="' + esc(tip) + '">' + segs + '</div><div class="tot">' +
+             (down ? dur(down) : '<span class="empty" title="не наблюдалось">—</span>') + "</div></div>";
+    }).join("");
+    if (!shown) rows = '<div class="empty">За период падений нет.</div>';
+    else if (u.daily.length > shown) rows += '<div class="hint">Дней без падений: ' + (u.daily.length - shown) + ".</div>";
+    $("daily").innerHTML = rows;
+
+    if (!u.incidents.length) {
+      $("incidents").innerHTML = '<div class="empty">За период падений нет.</div>';
+    } else {
+      var html = '<table><thead><tr><th></th><th>Начало</th><th>Конец</th><th>Длительность</th><th>Что</th></tr></thead><tbody>';
+      u.incidents.forEach(function (i) {
+        var id = esc(i.id), open = !!openRows[i.id];
+        html += '<tr class="' + (i.counted ? "" : "muted") + '"><td>' +
+                (i.detail ? '<button type="button" class="tg" data-toggle="' + id + '" title="Причина">' + (open ? "▾" : "▸") + "</button>" : "") +
+                '</td><td class="num">' + fmt(i.start, true) + '</td><td class="num">' + (i.open ? "сейчас" : fmt(i.end, true)) +
+                '</td><td class="num">' + (i.open ? '<span data-since="' + esc(i.start) + '">' + dur(i.duration_sec) + "</span>" : dur(i.duration_sec)) +
+                '</td><td><span class="kind"><i style="background:' + (COLORS[i.kind] || COLORS.gap) + '"></i>' + label(i) + "</span></td></tr>";
+        if (i.detail) {
+          html += '<tr class="detail" data-detail="' + id + '"' + (open ? "" : ' style="display:none"') +
+                  '><td></td><td colspan="4">Причина: ' + esc(i.detail) + "</td></tr>";
+        }
+      });
+      $("incidents").innerHTML = html + "</tbody></table>";
+    }
+
+    $("probes").innerHTML = u.probes.map(function (g) {
+      var head = g.group === "net" ? "Интернет" : "VPN — открывается только через VPN";
+      return '<div><div class="sub">' + head + "</div>" + g.targets.map(function (t) {
+        var mark = t.ok === undefined ? '<span class="empty">·</span>' : t.ok ? '<span class="ok-t">✓</span>' : '<span class="bad-t">✗</span>';
+        var info = t.ok === undefined ? "" : (t.ok ? t.ms + " мс" : esc(t.error)) + (t.at ? " · " + fmt(t.at) : "");
+        return '<div class="probe">' + mark + ' <span class="mono">' + esc(t.url) + '</span> <span class="sub">' + info + "</span></div>";
+      }).join("") + "</div>";
+    }).join("");
+  }
+
+  function tick() {
+    document.querySelectorAll("[data-since]").forEach(function (el) {
+      var t = Date.parse(el.getAttribute("data-since"));
+      if (!isNaN(t)) el.textContent = dur((Date.now() - t) / 1000);
+    });
+  }
+
+  function load() {
+    var tz = -new Date().getTimezoneOffset();
+    fetch("api/stats?days=" + days + "&tz=" + tz, {cache: "no-store"})
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (u) { $("error").style.display = "none"; render(u); })
+      .catch(function () {
+        $("error").textContent = "Монитор не отвечает — окно с ним закрыто или компьютер выключен. Данные ниже могут быть устаревшими.";
+        $("error").style.display = "";
+      });
+  }
+
+  function loadConfig() {
+    fetch("api/config", {cache: "no-store"}).then(function (r) { return r.json(); }).then(function (c) {
+      $("net_targets").value = c.net_targets.join("\n");
+      $("vpn_targets").value = c.vpn_targets.join("\n");
+      $("probe_interval_sec").value = c.probe_interval_sec;
+      $("min_outage_min").value = Math.round(c.min_outage_sec / 60);
+      $("listen").textContent = "Адрес и порт сервера (" + c.host + ":" + c.port + ") меняются в файле config.json, после перезапуска.";
+    }).catch(function () {});
+  }
+
+  $("settings").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var msg = $("save-msg"), btn = $("save");
+    var mins = parseFloat($("min_outage_min").value);
+    var body = {
+      net_targets: $("net_targets").value,
+      vpn_targets: $("vpn_targets").value,
+      probe_interval_sec: $("probe_interval_sec").value,
+      min_outage_sec: isNaN(mins) ? "" : Math.round(mins * 60)
+    };
+    btn.disabled = true; msg.textContent = ""; msg.style.color = "";
+    fetch("api/config", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json().then(function (j) { return [r.ok, j]; }); })
+      .then(function (res) {
+        if (!res[0]) throw new Error(res[1].error || "ошибка");
+        msg.textContent = "Сохранено, проверяю…"; msg.style.color = "var(--ok)";
+        loadConfig();
+        setTimeout(load, 1500); setTimeout(load, 15000);
+      })
+      .catch(function (err) { msg.textContent = err.message || "Ошибка"; msg.style.color = "var(--bad)"; })
+      .then(function () { btn.disabled = false; });
+  });
+
+  $("days").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-days]");
+    if (!b) return;
+    days = parseInt(b.getAttribute("data-days"), 10);
+    try { localStorage.setItem("is_days", String(days)); } catch (err) {}
+    renderDays(); load();
+  });
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-toggle]");
+    if (!b) return;
+    var id = b.getAttribute("data-toggle");
+    openRows[id] = !openRows[id];
+    var row = document.querySelector('[data-detail="' + CSS.escape(id) + '"]');
+    if (row) row.style.display = openRows[id] ? "" : "none";
+    b.textContent = openRows[id] ? "▾" : "▸";
+  });
+
+  renderDays();
+  load();
+  loadConfig();
+  setInterval(load, 30000);
+  setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>

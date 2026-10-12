@@ -1,0 +1,6 @@
+.venv/
+runtime/
+__pycache__/
+data/
+config.json
+.DS_Store
