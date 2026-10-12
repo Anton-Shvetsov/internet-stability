@@ -197,23 +197,45 @@ def subtract(interval: Interval, holes: list[Interval]) -> list[Interval]:
     return out
 
 
+def subtract_all(intervals: Iterable[Interval], holes: Iterable[Interval]) -> list[Interval]:
+    """A list of intervals minus a list of holes (both unioned here)."""
+    holes = union(holes)
+    out: list[Interval] = []
+    for iv in union(intervals):
+        out += subtract(iv, holes)
+    return out
+
+
 def clip(interval: Interval, lo: datetime, hi: datetime) -> Optional[Interval]:
     s, e = max(interval[0], lo), min(interval[1], hi)
     return (s, e) if e > s else None
 
 
-def local_day_slices(s: datetime, e: datetime, offset_min: int):
-    """Split [s, e) at LOCAL midnights of a fixed UTC offset → [(local date, seconds)]."""
+def local_day_pieces(s: datetime, e: datetime, offset_min: int):
+    """Split [s, e) at LOCAL midnights of a fixed UTC offset → [(local date, from_sec, to_sec)], the
+    seconds counted from that day's local midnight (a fixed offset ⇒ every day is 86 400 s)."""
     off = timedelta(minutes=int(offset_min))
     out = []
     cur = s
     while cur < e:
         local = cur + off
-        nxt = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0) - off
+        midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+        nxt = midnight + timedelta(days=1) - off
         end = min(e, nxt)
-        out.append(((cur + off).date(), (end - cur).total_seconds()))
+        frm = (local - midnight).total_seconds()
+        out.append((local.date(), frm, frm + (end - cur).total_seconds()))
         cur = end
     return out
+
+
+def local_day_slices(s: datetime, e: datetime, offset_min: int):
+    """Split [s, e) at LOCAL midnights of a fixed UTC offset → [(local date, seconds)]."""
+    return [(d, to - frm) for d, frm, to in local_day_pieces(s, e, offset_min)]
+
+
+#: The per-day timeline colours each moment by its most senior state only: while the monitor did not
+#: run nothing is known (grey), without the internet the VPN is not even probed.
+LAYER_ORDER = ("gap", "net", "vpn")
 
 
 # --- the summary for the page -----------------------------------------------------------------------
@@ -225,7 +247,9 @@ def summarize(incidents: list[dict], *, observed_from, since: datetime, until: d
     * the observed time starts at ``observed_from`` (the monitor's first run — nothing before it is
       known) and excludes every ``gap``;
     * the VPN is observed only while the internet is up (it is not probed otherwise);
-    * the total downtime is the union of the internet and VPN outages.
+    * the total downtime is the union of the internet and VPN outages;
+    * ``daily`` is a 0–24 h timeline per local day, each moment coloured by its most senior state
+      (``LAYER_ORDER``); ``since_last_down`` is the clean stretch since the last outage.
     """
     obs = parse_ts(observed_from) or until
     lo = max(since, obs)
@@ -279,17 +303,54 @@ def summarize(incidents: list[dict], *, observed_from, since: datetime, until: d
             return None
         return max(0.0, min(100.0, 100.0 * (1.0 - down / total)))
 
+    # The per-day timeline: every kind minus the senior ones (LAYER_ORDER), so each moment has one
+    # colour. Positions are seconds since the LOCAL midnight; `span_*` is the observed part of the day
+    # (the first day starts at the observation / the period, today ends now).
+    layer_src = {"gap": gaps_in, "net": per_kind["net"], "vpn": per_kind["vpn"]}
+    layers: dict[str, list[Interval]] = {}
+    senior: list[Interval] = []
+    for key in LAYER_ORDER:
+        layers[key] = subtract_all(layer_src[key], senior)
+        senior += layers[key]
     days: dict = {}
     if hi > lo:
-        for d, _sec in local_day_slices(lo, hi, tz_offset_min):
-            days[d] = {"net": 0.0, "vpn": 0.0, "gap": 0.0}
-    for key, items in (("net", per_kind["net"]), ("vpn", per_kind["vpn"]), ("gap", gaps_in)):
-        for s, e in union(items):
-            for d, sec in local_day_slices(s, e, tz_offset_min):
+        for d, frm, to in local_day_pieces(lo, hi, tz_offset_min):
+            days[d] = {k: 0.0 for k in LAYER_ORDER} | {"span_from": frm, "span_to": to, "segments": []}
+    for key, items in layers.items():
+        for s, e in items:
+            for d, frm, to in local_day_pieces(s, e, tz_offset_min):
                 if d in days:
-                    days[d][key] += sec
-    daily = [{"date": d.isoformat(), **{k: int(v) for k, v in vals.items()}}
+                    days[d][key] += to - frm
+                    days[d]["segments"].append({"kind": key, "from": int(round(frm)), "to": int(round(to))})
+    daily = [{"date": d.isoformat(), **{k: int(vals[k]) for k in LAYER_ORDER},
+              "span_from": int(round(vals["span_from"])), "span_to": int(round(vals["span_to"])),
+              "segments": sorted(vals["segments"], key=lambda g: g["from"])}
              for d, vals in sorted(days.items(), reverse=True)]
+
+    # «Без падений»: since the end of the LAST outage over the whole journal (not the period: a clean
+    # streak can be longer than it), its part outside the gaps; an outage open right now ⇒ None.
+    # A gap is not an outage and does not reset it.
+    last_end = None
+    open_now = False
+    for r in rows:
+        if r["kind"] not in KINDS:
+            continue
+        pieces = subtract((r["s"], r["e"]), gaps)
+        if not pieces:
+            continue
+        if not r["inc"].get("end"):
+            open_now = True
+        end = max(e for _s, e in pieces)
+        if last_end is None or end > last_end:
+            last_end = end
+    since_last_down = None
+    if not open_now:
+        if last_end is not None:
+            since_last_down = {"end": iso(last_end), "never": False,
+                               "sec": int(max(0.0, (until - last_end).total_seconds()))}
+        elif parse_ts(observed_from):
+            since_last_down = {"end": iso(obs), "never": True,
+                               "sec": int(max(0.0, (until - obs).total_seconds()))}
 
     counted_rows = [x for x in listed if x["counted"]]
     return {
@@ -305,4 +366,5 @@ def summarize(incidents: list[dict], *, observed_from, since: datetime, until: d
         "gap_sec": int(measure(gaps_in)),
         "incidents": listed,
         "daily": daily,
+        "since_last_down": since_last_down,
     }

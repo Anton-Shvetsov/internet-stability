@@ -4,25 +4,42 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Стабильность интернета</title>
+<script>
+  // The theme chosen with the ☀/☾ button, applied before the first paint (no flash of the other one).
+  // No choice saved = follow the system.
+  try { var t = localStorage.getItem("is_theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2310b981'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f5f6f8; --card: #ffffff; --border: #e3e6eb; --text: #1f2937; --muted: #6b7280;
     --faint: #9ca3af; --track: #eef0f3; --row: #f0f2f5;
     --ok: #059669; --warn: #d97706; --bad: #dc2626;
-    --net: #ef4444; --vpn: #f59e0b; --gap: #cbd5e1;
+    --net: #ef4444; --vpn: #f59e0b; --gap: #cbd5e1; --tick: rgba(107, 114, 128, .3);
     --banner-bg: #fffbeb; --banner-border: #fcd34d; --banner-text: #92400e;
     --accent: #2563eb;
+    color-scheme: light;
   }
+  /* dark: by the system unless light is chosen, or chosen explicitly (the ☀/☾ button) */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #0f1115; --card: #171a21; --border: #2a2f3a; --text: #e5e7eb; --muted: #9ca3af;
       --faint: #6b7280; --track: #232733; --row: #222632;
       --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
-      --gap: #475569;
+      --gap: #475569; --tick: rgba(156, 163, 175, .25);
       --banner-bg: #2a2110; --banner-border: #8a6a1c; --banner-text: #fcd34d;
       --accent: #60a5fa;
+      color-scheme: dark;
     }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115; --card: #171a21; --border: #2a2f3a; --text: #e5e7eb; --muted: #9ca3af;
+    --faint: #6b7280; --track: #232733; --row: #222632;
+    --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+    --gap: #475569; --tick: rgba(156, 163, 175, .25);
+    --banner-bg: #2a2110; --banner-border: #8a6a1c; --banner-text: #fcd34d;
+    --accent: #60a5fa;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
@@ -38,6 +55,10 @@
                 font: inherit; }
   .seg button + button { border-left: 1px solid var(--border); }
   .seg button.on { background: var(--accent); color: #fff; }
+  .tools { display: flex; align-items: center; gap: 8px; }
+  .themebtn { border: 1px solid var(--border); background: var(--card); color: var(--muted); border-radius: 8px;
+              width: 34px; height: 32px; cursor: pointer; font-size: 15px; line-height: 1; }
+  .themebtn:hover { color: var(--text); }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
           margin-bottom: 14px; }
   .card h3 { font-size: 14px; margin: 0 0 10px; }
@@ -62,7 +83,19 @@
   .head h3 { margin: 0; }
   .day { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 3px 0; }
   .day .dt { width: 46px; flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .day .bar { flex: 1; height: 12px; background: var(--track); border-radius: 4px; overflow: hidden; display: flex; }
+  .day .bar { flex: 1; height: 12px; border-radius: 4px; overflow: hidden; position: relative; }
+  .day .bar > div { position: absolute; top: 0; bottom: 0; }
+  .day .bar .base { background: var(--track); }
+  .day .bar .sg { min-width: 2px; }
+  .day .bar .hours { left: 0; right: 0; pointer-events: none;
+    background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / 24 - 1px),
+      var(--tick) calc(100% / 24 - 1px), var(--tick) calc(100% / 24)); }
+  .axis { display: flex; gap: 8px; font-size: 10px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .axis .sp { width: 46px; flex: none; } .axis .sp2 { width: 92px; flex: none; }
+  .axis .scale { flex: 1; position: relative; height: 18px; }
+  .axis .lb { position: absolute; top: 0; line-height: 1; }
+  .axis .tk { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--tick); }
+  @media (max-width: 600px) { .axis .lb.m3 { display: none; } }
   .day .tot { width: 92px; flex: none; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .empty { color: var(--faint); }
   .tablewrap { overflow-x: auto; }
@@ -101,7 +134,10 @@
       <h1>Стабильность интернета</h1>
       <div class="sub" id="host"></div>
     </div>
-    <div class="seg" id="days"></div>
+    <div class="tools">
+      <div class="seg" id="days"></div>
+      <button type="button" class="themebtn" id="theme"></button>
+    </div>
   </header>
 
   <div id="error" class="banner" style="display:none"></div>
@@ -114,13 +150,13 @@
     <div class="head">
       <h3>По дням</h3>
       <div class="legend">
+        <span><span class="sw" style="background:var(--gap)"></span>монитор не работал</span>
         <span><span class="sw" style="background:var(--net)"></span>нет интернета</span>
         <span><span class="sw" style="background:var(--vpn)"></span>нет VPN</span>
-        <span><span class="sw" style="background:var(--gap)"></span>монитор не работал</span>
       </div>
     </div>
     <div id="daily"></div>
-    <div class="hint">Полоса — сутки. Серое — время, когда монитор не работал (компьютер выключен или спал, окно закрыто): что было с интернетом тогда, неизвестно, и в доступность это время не входит.</div>
+    <div class="hint">Полоса — сутки 0–24 ч по времени этого устройства, падения на своих местах. В каждый момент закрашено старшее: монитор не работал → нет интернета → нет VPN (без интернета VPN не проверяется). Серое — время, когда монитор не работал (компьютер выключен или спал, окно закрыто): что было с интернетом тогда, неизвестно, и в доступность это время не входит.</div>
   </div>
 
   <div class="card">
@@ -172,6 +208,7 @@
   var GAP_LABELS = {stop: "монитор остановлен", crash: "монитор не работал", sleep: "компьютер спал",
                     unknown: "нет данных"};
   var COLORS = {net: "var(--net)", vpn: "var(--vpn)", gap: "var(--gap)"};
+  var NAMES = {gap: "монитор не работал", net: "нет интернета", vpn: "нет VPN"};
   var openRows = {};
   var days = 30;
   var last = null;
@@ -200,6 +237,19 @@
   function fmtFull(iso) {
     var t = new Date(iso);
     return pad(t.getDate()) + "." + pad(t.getMonth() + 1) + "." + t.getFullYear() + " " + fmt(iso);
+  }
+  // a timeline position: seconds since the local midnight → % of the day (86 400 s = 100 %)
+  function x(sec) { return (sec / 864).toFixed(3) + "%"; }
+  function hm(sec) { return pad(Math.floor(sec / 3600)) + ":" + pad(Math.floor((sec % 3600) / 60)); }
+  function axis() {
+    var out = "";
+    for (var h = 0; h <= 24; h++) {
+      var shift = h === 0 ? "0" : h === 24 ? "-100%" : "-50%";
+      out += '<div class="lb' + (h % 3 ? " m3" : "") + '" style="left:' + (h * 100 / 24).toFixed(3) +
+             "%;transform:translateX(" + shift + ')">' + h + "</div>" +
+             '<div class="tk" style="left:' + (h * 100 / 24).toFixed(3) + "%;margin-left:" + (h ? "-1px" : "0") + '"></div>';
+    }
+    return '<div class="axis"><div class="sp"></div><div class="scale">' + out + '</div><div class="sp2"></div></div>';
   }
   function pct(v) { return v == null ? '<span class="empty">—</span>' : v.toFixed(2) + "%"; }
   function since(iso) { return (Date.now() - Date.parse(iso)) / 1000; }
@@ -254,24 +304,32 @@
       "Проверка раз в " + u.interval_sec + " с; падения короче " + minOut + " мин не записываются." +
       (u.gap_sec ? " Монитор не работал за период: " + dur(u.gap_sec) + "." : "");
 
+    // «По дням»: the server hands every day its segments (seconds since the local midnight, already
+    // layered gap → net → vpn, so one colour per moment) and the observed span; here they are only placed.
     var shown = 0;
     var rows = u.daily.map(function (d) {
-      var total = d.net + d.vpn + d.gap;
-      if (!total) return "";
+      if (!(d.net + d.vpn + d.gap)) return "";
       shown++;
-      var segs = ["net", "vpn", "gap"].map(function (k) {
-        if (!d[k]) return "";
-        return '<div style="width:' + Math.max(d[k] / 864, 0.4).toFixed(3) + "%;background:" + COLORS[k] + '"></div>';
-      }).join("");
+      var bar = (d.span_to > d.span_from ? '<div class="base" style="left:' + x(d.span_from) + ";width:" +
+                 x(d.span_to - d.span_from) + '"></div>' : "") +
+        d.segments.map(function (g) {
+          return '<div class="sg" style="left:' + x(g.from) + ";width:" + x(g.to - g.from) + ";background:" +
+                 COLORS[g.kind] + '" title="' + esc(hm(g.from) + "–" + hm(g.to) + " · " + NAMES[g.kind]) + '"></div>';
+        }).join("") + '<div class="hours"></div>';
       var down = d.net + d.vpn;
-      var tip = (d.net ? "нет интернета: " + dur(d.net) + " " : "") + (d.vpn ? "нет VPN: " + dur(d.vpn) + " " : "") +
-                (d.gap ? "не наблюдалось: " + dur(d.gap) : "");
+      var tip = ["gap", "net", "vpn"].filter(function (k) { return d[k]; })
+        .map(function (k) { return NAMES[k] + ": " + dur(d[k]); }).join("\n");
       return '<div class="day"><div class="dt">' + d.date.slice(8, 10) + "." + d.date.slice(5, 7) +
-             '</div><div class="bar" title="' + esc(tip) + '">' + segs + '</div><div class="tot">' +
-             (down ? dur(down) : '<span class="empty" title="не наблюдалось">—</span>') + "</div></div>";
+             '</div><div class="bar">' + bar + '</div><div class="tot" title="' + esc(tip) + '">' +
+             (down ? dur(down) : '<span class="empty">—</span>') + "</div></div>";
     }).join("");
-    if (!shown) rows = '<div class="empty">За период падений нет.</div>';
-    else if (u.daily.length > shown) rows += '<div class="hint">Дней без падений: ' + (u.daily.length - shown) + ".</div>";
+    rows = shown ? axis() + rows : '<div class="empty">За период падений нет.</div>';
+    var q = u.since_last_down;
+    if (q) {
+      rows += '<div class="hint">' + (q.never ? "Без падений с начала наблюдения" : "Без падений") +
+              ': <b><span data-since="' + esc(q.end) + '">' + dur(q.sec) + "</span></b>" +
+              (q.never ? "" : " (с " + fmt(q.end, true) + ")") + ".</div>";
+    }
     $("daily").innerHTML = rows;
 
     if (!u.incidents.length) {
@@ -371,6 +429,26 @@
     if (row) row.style.display = openRows[id] ? "" : "none";
     b.textContent = openRows[id] ? "▾" : "▸";
   });
+
+  // ☀/☾: the button shows the theme a click switches TO; the choice is kept in this browser.
+  var darkMq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function themeNow() {
+    var t = document.documentElement.getAttribute("data-theme");
+    return t || (darkMq && darkMq.matches ? "dark" : "light");
+  }
+  function renderTheme() {
+    var dark = themeNow() === "dark";
+    $("theme").textContent = dark ? "☀" : "☾";
+    $("theme").title = dark ? "Светлая тема" : "Тёмная тема";
+  }
+  $("theme").addEventListener("click", function () {
+    var next = themeNow() === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("is_theme", next); } catch (err) {}
+    renderTheme();
+  });
+  if (darkMq && darkMq.addEventListener) darkMq.addEventListener("change", renderTheme);
+  renderTheme();
 
   renderDays();
   load();
