@@ -26,9 +26,11 @@ DEFAULTS = {
     "vpn_targets": ["https://telegram.org", "https://www.instagram.com"],
     "speedtest_enabled": False,
     "speedtest_interval_min": 60,
+    "update_check_min": 60,
 }
 
-#: The keys the page may change; ``host``/``port`` are edited in the file (they need a restart).
+#: The keys the page may change; ``host``/``port`` are edited in the file (they need a restart), and
+#: ``update_check_min`` too (``supervisor.py`` reads it on its own; kept here so the file shows it).
 EDITABLE = ("probe_interval_sec", "min_outage_sec", "net_targets", "vpn_targets",
             "speedtest_enabled", "speedtest_interval_min")
 MAX_TARGETS = 10
@@ -122,6 +124,11 @@ def load() -> dict:
         port = int(raw.get("port", DEFAULTS["port"]))
         if 1 <= port <= 65535:
             cfg["port"] = port
+    except (TypeError, ValueError):
+        pass
+    try:
+        minutes = int(raw.get("update_check_min", DEFAULTS["update_check_min"]))
+        cfg["update_check_min"] = 0 if minutes <= 0 else max(10, min(1440, minutes))
     except (TypeError, ValueError):
         pass
     for key in EDITABLE:

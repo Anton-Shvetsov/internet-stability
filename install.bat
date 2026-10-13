@@ -114,6 +114,7 @@ echo ===========================================================================
 echo INSTALLATION SUCCESSFUL: %ROOT%
 echo Start the monitor with %ROOT%\start.bat
 echo If it was already running, restart it to pick up the update.
+echo After that it checks GitHub for updates and installs them by itself.
 echo ============================================================================
 pause
 exit /b 0

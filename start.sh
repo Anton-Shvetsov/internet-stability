@@ -5,4 +5,5 @@ if [ ! -x runtime/venv/bin/python ]; then
   echo "The monitor is not installed. Run install.sh first (see README.md)."
   exit 1
 fi
-exec runtime/venv/bin/python app.py
+# supervisor.py runs app.py and keeps it updated from GitHub (see README.md).
+exec runtime/venv/bin/python supervisor.py

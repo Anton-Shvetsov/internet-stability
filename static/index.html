@@ -296,7 +296,8 @@
 
   function render(u) {
     last = u;
-    $("host").textContent = "Устройство: " + u.host + (u.live.last_tick ? " · последняя проверка в " + fmt(u.live.last_tick) : "");
+    $("host").textContent = "Устройство: " + u.host + (u.live.last_tick ? " · последняя проверка в " + fmt(u.live.last_tick) : "") +
+                            (u.version ? " · версия " + u.version : "");
     var live = u.live;
     if (!live.running || !live.last_tick) {
       $("status").innerHTML = statusCard("Интернет", null, live.running ? "первая проверка…" : "монитор не запущен") +

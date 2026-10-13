@@ -82,7 +82,8 @@ main() {
     START="run $ROOT/start.sh"
   fi
   banner "INSTALLATION SUCCESSFUL: $ROOT" "Start the monitor: $START" \
-    "If it was already running, restart it to pick up the update."
+    "If it was already running, restart it to pick up the update." \
+    "After that it checks GitHub for updates and installs them by itself."
 }
 
 main "$@"; exit

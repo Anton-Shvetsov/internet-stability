@@ -6,5 +6,6 @@ if not exist runtime\venv\Scripts\python.exe (
   pause
   exit /b 1
 )
-runtime\venv\Scripts\python app.py
+rem supervisor.py runs app.py and keeps it updated from GitHub (see README.md).
+runtime\venv\Scripts\python supervisor.py
 pause

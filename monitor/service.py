@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import time
 from datetime import datetime, timedelta, timezone
@@ -360,6 +361,7 @@ def stats(days: int, tz_offset_min: int) -> dict:
             live["vpn"] = None  # not probed while the internet is down
     out["live"] = live
     out["host"] = socket.gethostname()
+    out["version"] = os.environ.get("MONITOR_VERSION") or None  # set by supervisor.py
     out["now"] = core.iso(now)
     out["interval_sec"] = cfg["probe_interval_sec"]
     out["min_outage_sec"] = cfg["min_outage_sec"]
