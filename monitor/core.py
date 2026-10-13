@@ -368,3 +368,38 @@ def summarize(incidents: list[dict], *, observed_from, since: datetime, until: d
         "daily": daily,
         "since_last_down": since_last_down,
     }
+
+
+# --- the download speed ------------------------------------------------------------------------------
+
+def speed_summary(samples: list[dict], *, since: datetime, until: datetime, tz_offset_min: int = 0) -> dict:
+    """The speed measurements of [since, until] → the period's average and one row per LOCAL day.
+
+    A failed measurement (no ``mbps``) is not a speed of 0: it is left out of the averages and only
+    counted in ``failed`` — the outages already tell what the internet was doing then."""
+    off = timedelta(minutes=int(tz_offset_min))
+    days: dict = {}
+    good: list[float] = []
+    failed = 0
+    for smp in samples:
+        at = parse_ts(smp.get("at"))
+        if at is None or not since <= at <= until:
+            continue
+        mbps = smp.get("mbps")
+        d = days.setdefault((at + off).date(), {"values": [], "failed": 0})
+        if isinstance(mbps, (int, float)) and mbps > 0:
+            d["values"].append(float(mbps))
+            good.append(float(mbps))
+        else:
+            d["failed"] += 1
+            failed += 1
+
+    def avg(v: list[float]) -> Optional[float]:
+        return round(sum(v) / len(v), 1) if v else None
+
+    daily = [{"date": d.isoformat(), "avg_mbps": avg(v["values"]),
+              "min_mbps": round(min(v["values"]), 1) if v["values"] else None,
+              "max_mbps": round(max(v["values"]), 1) if v["values"] else None,
+              "count": len(v["values"]), "failed": v["failed"]}
+             for d, v in sorted(days.items(), reverse=True)]
+    return {"avg_mbps": avg(good), "count": len(good), "failed": failed, "daily": daily}

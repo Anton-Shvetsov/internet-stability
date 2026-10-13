@@ -10,6 +10,11 @@ without the VPN keeps the group alive forever and VPN outages go unseen: the pag
 of every target, and the targets are checked once by switching the VPN off.
 ⚠️ No keep-alive: a probe over a pooled connection does no new TLS handshake, so it would keep
 answering «reachable» after DPI (or a dead tunnel) started refusing NEW connections.
+
+The download speed is measured in a loop of its own (when enabled on the page), every
+``speedtest_interval_min``: one file of ``SPEED_BYTES`` from Cloudflare's speed test, timed from the first
+byte to the last. It runs beside the probes so a slow download never stretches a tick (which the sleep
+detector would read as a freeze). Not while the internet is down — that is an outage, not a speed.
 """
 
 from __future__ import annotations
@@ -31,6 +36,13 @@ PROBE_TIMEOUT_SEC = 8.0
 #: The whole group is bounded too: a DNS lookup runs in a thread httpx cannot interrupt, and a hung
 #: resolver must not stretch a tick.
 GROUP_TIMEOUT_SEC = PROBE_TIMEOUT_SEC + 4.0
+
+SPEED_BYTES = 10_000_000
+SPEED_URL = f"https://speed.cloudflare.com/__down?bytes={SPEED_BYTES}"
+#: The whole download; on a link slower than ~1.5 Mbit/s it fails, which is an answer too.
+SPEED_TIMEOUT_SEC = 60.0
+#: How often the speed loop looks whether a measurement is due.
+SPEED_CHECK_SEC = 60
 
 
 def _now() -> datetime:
@@ -76,6 +88,32 @@ async def _probe_group(client: httpx.AsyncClient, urls: list[str]) -> tuple[bool
     alive = any(r["ok"] for r in results)
     detail = "; ".join(f"{_short(u)}: {r['error']}" for u, r in by_url.items() if not r["ok"])
     return alive, detail, by_url
+
+
+async def _download(client: httpx.AsyncClient) -> tuple[int, float]:
+    """→ (bytes, seconds from the first byte to the last)."""
+    got, t0 = 0, None
+    async with client.stream("GET", SPEED_URL) as resp:
+        resp.raise_for_status()
+        async for chunk in resp.aiter_bytes():
+            if t0 is None:
+                t0 = time.monotonic()
+            got += len(chunk)
+    return got, (time.monotonic() - t0) if t0 is not None else 0.0
+
+
+async def _speedtest(client: httpx.AsyncClient) -> dict:
+    """One measurement → a sample for ``speed.json``: ``mbps`` on success, ``error`` otherwise."""
+    at = core.iso(_now())
+    try:
+        got, sec = await asyncio.wait_for(_download(client), timeout=SPEED_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        return {"at": at, "mbps": None, "error": "timeout"}
+    except Exception as e:
+        return {"at": at, "mbps": None, "error": _classify(e)}
+    if got < SPEED_BYTES // 2 or sec <= 0:
+        return {"at": at, "mbps": None, "bytes": got, "error": "short"}
+    return {"at": at, "mbps": round(got * 8 / sec / 1e6, 2), "bytes": got, "sec": round(sec, 2), "error": ""}
 
 
 class Monitor:
@@ -190,12 +228,58 @@ class Monitor:
 
 _monitor: Optional[Monitor] = None
 _wake: Optional[asyncio.Event] = None
+_speed_wake: Optional[asyncio.Event] = None
 
 
 def wake() -> None:
-    """Probe now (after a settings save) instead of waiting for the interval."""
-    if _wake is not None:
-        _wake.set()
+    """Probe now (after a settings save) instead of waiting for the interval; the speed loop rechecks
+    too, so switching the measurement on starts it without waiting a minute."""
+    for ev in (_wake, _speed_wake):
+        if ev is not None:
+            ev.set()
+
+
+def _speed_due(cfg: dict, now: datetime) -> bool:
+    """Enabled, the internet up, the last measurement (from ``speed.json``, so a restart does not
+    measure again at once) at least an interval old."""
+    m = _monitor
+    if not cfg["speedtest_enabled"] or m is None or m.last_tick is None or m.net.down:
+        return False
+    samples = store.load_speed()
+    last = core.parse_ts(samples[-1].get("at")) if samples else None
+    return last is None or last > now or (now - last).total_seconds() >= cfg["speedtest_interval_min"] * 60
+
+
+async def speed_loop(stop_event: asyncio.Event) -> None:
+    global _speed_wake
+    _speed_wake = asyncio.Event()
+    client = httpx.AsyncClient(timeout=PROBE_TIMEOUT_SEC, follow_redirects=False, trust_env=False,
+                               limits=httpx.Limits(max_keepalive_connections=0))
+    try:
+        while not stop_event.is_set():
+            try:
+                if _speed_due(config.load(), _now()):
+                    sample = await _speedtest(client)
+                    store.add_speed_sample(sample)
+                    if sample["mbps"] is not None:
+                        logger.info("download speed %.1f Mbit/s", sample["mbps"])
+                    else:
+                        logger.warning("speed test failed: %s", sample["error"])
+            except Exception:
+                logger.exception("speed test failed")
+            _speed_wake.clear()
+            waiters = [asyncio.ensure_future(stop_event.wait()), asyncio.ensure_future(_speed_wake.wait())]
+            try:
+                await asyncio.wait(waiters, timeout=SPEED_CHECK_SEC, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for w in waiters:
+                    w.cancel()
+    finally:
+        _speed_wake = None
+        try:
+            await client.aclose()
+        except BaseException:
+            pass
 
 
 async def run_loop(stop_event: asyncio.Event) -> None:
@@ -207,6 +291,7 @@ async def run_loop(stop_event: asyncio.Event) -> None:
         logger.exception("start failed")
     _monitor = m
     _wake = asyncio.Event()
+    speed = asyncio.create_task(speed_loop(stop_event), name="speed")
     client = httpx.AsyncClient(timeout=PROBE_TIMEOUT_SEC, follow_redirects=False, trust_env=False,
                                limits=httpx.Limits(max_keepalive_connections=0))
     clean = False
@@ -233,6 +318,11 @@ async def run_loop(stop_event: asyncio.Event) -> None:
         # «не работал» rather than «остановлен» — wrong too, but loud, and logged.
         _monitor = None
         _wake = None
+        speed.cancel()
+        try:
+            await speed
+        except BaseException:
+            pass
         if clean:
             try:
                 m.mark_clean_exit()
@@ -273,4 +363,9 @@ def stats(days: int, tz_offset_min: int) -> dict:
     out["now"] = core.iso(now)
     out["interval_sec"] = cfg["probe_interval_sec"]
     out["min_outage_sec"] = cfg["min_outage_sec"]
+    samples = store.load_speed()
+    out["speed"] = core.speed_summary(samples, since=now - timedelta(days=int(days)), until=now,
+                                      tz_offset_min=tz_offset_min) | {
+        "enabled": cfg["speedtest_enabled"], "interval_min": cfg["speedtest_interval_min"],
+        "last": samples[-1] if samples else None}
     return out

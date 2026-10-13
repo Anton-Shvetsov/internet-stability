@@ -2,7 +2,8 @@
 
 * ``incidents.json`` — ``{"incidents": [...]}``: the outages and the gaps, pruned to ``RETENTION_DAYS``;
 * ``state.json``     — the run's bookkeeping: ``observed_from``, ``alive_at``, ``clean_exit``, the last
-  probe per target.
+  probe per target;
+* ``speed.json``     — ``{"samples": [...]}``: the download speed measurements, pruned the same way.
 
 ⚠️ Every writer swallows and logs its error: on Windows ``os.replace`` fails now and then while an
 antivirus or a backup is reading the same file, and the monitor's loop must not die of it.
@@ -32,6 +33,10 @@ def incidents_path() -> str:
 
 def state_path() -> str:
     return os.path.join(DATA_DIR, "state.json")
+
+
+def speed_path() -> str:
+    return os.path.join(DATA_DIR, "speed.json")
 
 
 def write_json(path: str, data) -> None:
@@ -158,6 +163,48 @@ def close_open_incidents() -> int:
     if closed:
         _write_journal({"incidents": incidents})
     return closed
+
+
+# --- the speed samples ------------------------------------------------------------------------------
+
+def _read_speed() -> tuple[list, bool]:
+    """→ (samples, writable). Unlike the journal, a file that does not parse simply starts over: a
+    few lost measurements are not worth a moved-aside copy. A file not readable RIGHT NOW is not
+    overwritten."""
+    path = speed_path()
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return [], not os.path.exists(path)
+    hit = _cache.get(path)
+    if hit and hit[0] == mtime:
+        data = hit[1]
+    else:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except ValueError:
+            logger.error("%s did not parse — the speed history starts over", path)
+            return [], True
+        except OSError:
+            logger.warning("%s is not readable right now — the write is skipped", path)
+            return [], False
+        _cache[path] = (mtime, data)
+    samples = data.get("samples") if isinstance(data, dict) else None
+    return [s for s in (samples or []) if isinstance(s, dict)], True
+
+
+def load_speed() -> list:
+    return _read_speed()[0]
+
+
+def add_speed_sample(sample: dict) -> bool:
+    samples, ok = _read_speed()
+    if not ok:
+        return False
+    floor = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
+    keep = [s for s in samples if (core.parse_ts(s.get("at")) or floor) >= floor]
+    return _save(speed_path(), {"samples": keep + [dict(sample)]})
 
 
 # --- the run state ----------------------------------------------------------------------------------

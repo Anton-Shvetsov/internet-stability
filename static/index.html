@@ -125,6 +125,9 @@
   .btn:disabled { opacity: .6; cursor: default; }
   .msg { margin-left: 10px; font-size: 13px; }
   .hint { font-size: 12px; color: var(--faint); margin-top: 6px; }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; margin-top: 14px; }
+  .check input { margin: 0; }
+  .day .bar .spd { left: 0; background: var(--accent); }
 </style>
 </head>
 <body>
@@ -157,6 +160,11 @@
     </div>
     <div id="daily"></div>
     <div class="hint">Полоса — сутки 0–24 ч по времени этого устройства, падения на своих местах. В каждый момент закрашено старшее: монитор не работал → нет интернета → нет VPN (без интернета VPN не проверяется). Серое — время, когда монитор не работал (компьютер выключен или спал, окно закрыто): что было с интернетом тогда, неизвестно, и в доступность это время не входит.</div>
+  </div>
+
+  <div class="card" id="speed-card" style="display:none">
+    <h3>Скорость загрузки</h3>
+    <div id="speed"></div>
   </div>
 
   <div class="card">
@@ -192,6 +200,16 @@
           <div>
             <label for="min_outage_min">Порог падения, минут — короче не записывается (0–1440)</label>
             <input type="number" id="min_outage_min" min="0" max="1440" step="1">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label class="check"><input type="checkbox" id="speedtest_enabled"> Измерять скорость загрузки (≈10 МБ за замер)</label>
+          </div>
+          <div>
+            <label for="speedtest_interval_min">Интервал замера скорости, минут (15–1440)</label>
+            <input type="number" id="speedtest_interval_min" min="15" max="1440" step="1">
+            <div class="hint" id="speed-traffic"></div>
           </div>
         </div>
         <button class="btn" type="submit" id="save">Сохранить</button><span class="msg" id="save-msg"></span>
@@ -295,6 +313,7 @@
 
     var tiles = [["Доступность", pct(u.uptime.all)], ["Интернет", pct(u.uptime.net)], ["VPN", pct(u.uptime.vpn)],
                  ["Падений", u.count], ["Простой всего", dur(u.down_sec)], ["Самое долгое", dur(u.longest_sec)]];
+    if (u.speed.avg_mbps != null) tiles.push(["Скорость, сред.", mbps(u.speed.avg_mbps)]);
     $("tiles").innerHTML = tiles.map(function (t) {
       return '<div class="tile"><div class="k">' + t[0] + '</div><div class="v">' + t[1] + "</div></div>";
     }).join("");
@@ -351,6 +370,8 @@
       $("incidents").innerHTML = html + "</tbody></table>";
     }
 
+    renderSpeed(u.speed);
+
     $("probes").innerHTML = u.probes.map(function (g) {
       var head = g.group === "net" ? "Интернет" : "VPN — открывается только через VPN";
       return '<div><div class="sub">' + head + "</div>" + g.targets.map(function (t) {
@@ -359,6 +380,39 @@
         return '<div class="probe">' + mark + ' <span class="mono">' + esc(t.url) + '</span> <span class="sub">' + info + "</span></div>";
       }).join("") + "</div>";
     }).join("");
+  }
+
+  function plural(n, one, few, many) {
+    var m10 = n % 10, m100 = n % 100;
+    return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+  }
+  function mbps(v) { return v == null ? '<span class="empty">—</span>' : (v < 10 ? v.toFixed(1) : Math.round(v)) + " Мбит/с"; }
+
+  // «Скорость загрузки»: the average per local day, the bar relative to the best day of the period.
+  function renderSpeed(sp) {
+    $("speed-card").style.display = sp.enabled || sp.daily.length ? "" : "none";
+    var l = sp.last, head = "";
+    if (l) {
+      head = "Последний замер " + fmt(l.at, true) + ": " +
+             (l.mbps != null ? "<b>" + mbps(l.mbps) + "</b>" : '<span class="bad-t">не удался (' + esc(l.error) + ")</span>") + ". ";
+    }
+    head += sp.enabled ? "Замер раз в " + dur(sp.interval_min * 60) + "." : "Замер выключен (включается в «Настройках»).";
+    if (sp.avg_mbps != null) head += " Среднее за период: <b>" + mbps(sp.avg_mbps) + "</b> (" + sp.count + " " + plural(sp.count, "замер", "замера", "замеров") + ").";
+    var top = Math.max.apply(null, sp.daily.map(function (d) { return d.avg_mbps || 0; }).concat([0]));
+    var rows = sp.daily.map(function (d) {
+      var w = d.avg_mbps != null && top > 0 ? (100 * d.avg_mbps / top).toFixed(1) + "%" : "0";
+      var tip = d.count ? "замеров: " + d.count + ", мин " + d.min_mbps + " – макс " + d.max_mbps + " Мбит/с" : "";
+      if (d.failed) tip += (tip ? "\n" : "") + "не удались: " + d.failed;
+      return '<div class="day"><div class="dt">' + d.date.slice(8, 10) + "." + d.date.slice(5, 7) +
+             '</div><div class="bar"><div class="base" style="left:0;right:0"></div><div class="spd" style="width:' + w +
+             '"></div></div><div class="tot" title="' + esc(tip) + '">' + mbps(d.avg_mbps) + "</div></div>";
+    }).join("");
+    $("speed").innerHTML = '<p class="note">' + head + "</p>" + (rows || '<div class="empty">За период замеров нет.</div>');
+  }
+
+  function trafficHint() {
+    var n = parseInt($("speedtest_interval_min").value, 10);
+    $("speed-traffic").textContent = n >= 15 ? "≈" + Math.round(10 * 1440 / n) + " МБ трафика в сутки" : "";
   }
 
   function tick() {
@@ -385,6 +439,9 @@
       $("vpn_targets").value = c.vpn_targets.join("\n");
       $("probe_interval_sec").value = c.probe_interval_sec;
       $("min_outage_min").value = Math.round(c.min_outage_sec / 60);
+      $("speedtest_enabled").checked = !!c.speedtest_enabled;
+      $("speedtest_interval_min").value = c.speedtest_interval_min;
+      trafficHint();
       $("listen").textContent = "Адрес и порт сервера (" + c.host + ":" + c.port + ") меняются в файле config.json, после перезапуска.";
     }).catch(function () {});
   }
@@ -397,7 +454,9 @@
       net_targets: $("net_targets").value,
       vpn_targets: $("vpn_targets").value,
       probe_interval_sec: $("probe_interval_sec").value,
-      min_outage_sec: isNaN(mins) ? "" : Math.round(mins * 60)
+      min_outage_sec: isNaN(mins) ? "" : Math.round(mins * 60),
+      speedtest_enabled: $("speedtest_enabled").checked,
+      speedtest_interval_min: $("speedtest_interval_min").value
     };
     btn.disabled = true; msg.textContent = ""; msg.style.color = "";
     fetch("api/config", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
@@ -411,6 +470,8 @@
       .catch(function (err) { msg.textContent = err.message || "Ошибка"; msg.style.color = "var(--bad)"; })
       .then(function () { btn.disabled = false; });
   });
+
+  $("speedtest_interval_min").addEventListener("input", trafficHint);
 
   $("days").addEventListener("click", function (e) {
     var b = e.target.closest("[data-days]");

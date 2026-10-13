@@ -24,10 +24,13 @@ DEFAULTS = {
     "min_outage_sec": 180,
     "net_targets": ["https://ya.ru", "https://1.1.1.1"],
     "vpn_targets": ["https://telegram.org", "https://www.instagram.com"],
+    "speedtest_enabled": False,
+    "speedtest_interval_min": 60,
 }
 
 #: The keys the page may change; ``host``/``port`` are edited in the file (they need a restart).
-EDITABLE = ("probe_interval_sec", "min_outage_sec", "net_targets", "vpn_targets")
+EDITABLE = ("probe_interval_sec", "min_outage_sec", "net_targets", "vpn_targets",
+            "speedtest_enabled", "speedtest_interval_min")
 MAX_TARGETS = 10
 
 
@@ -43,6 +46,14 @@ def _int(value, lo: int, hi: int, what: str) -> int:
     if not lo <= out <= hi:
         raise ConfigError(f"{what}: допустимо от {lo} до {hi}")
     return out
+
+
+def _bool(value, what: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (0, 1) or str(value).strip().lower() in ("true", "false", "0", "1"):
+        return str(value).strip().lower() in ("true", "1")
+    raise ConfigError(f"{what}: нужно да или нет")
 
 
 def _targets(value, what: str) -> list[str]:
@@ -80,6 +91,11 @@ def validate(data: dict) -> dict:
         out["net_targets"] = _targets(data["net_targets"], "Цели интернета")
     if "vpn_targets" in data:
         out["vpn_targets"] = _targets(data["vpn_targets"], "Цели VPN")
+    if "speedtest_enabled" in data:
+        out["speedtest_enabled"] = _bool(data["speedtest_enabled"], "Замер скорости")
+    if "speedtest_interval_min" in data:
+        out["speedtest_interval_min"] = _int(data["speedtest_interval_min"], 15, 1440,
+                                             "Интервал замера скорости")
     return out
 
 
